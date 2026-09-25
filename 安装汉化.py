@@ -85,26 +85,26 @@ def game_running():
                          capture_output=True).stdout
     return b"game.exe" in out
 
-
-def find_game():
-    """注册表 SteamPath + libraryfolders.vdf 定位游戏目录与 appmanifest。"""
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
-            steam, _ = winreg.QueryValueEx(k, "SteamPath")
-    except OSError:
-        sys.exit("注册表未找到 Steam，请手动确认安装路径。")
-    libs = [steam]
-    lf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
-    if os.path.isfile(lf):
-        for m in re.finditer(r'"path"\s+"([^"]+)"', open(lf, encoding="utf-8", errors="ignore").read()):
-            libs.append(m.group(1).replace("\\\\", "\\"))
-    for lib in libs:
-        acf = os.path.join(lib, "steamapps", f"appmanifest_{APP_ID}.acf")
-        if os.path.isfile(acf):
-            game = os.path.join(lib, "steamapps", "common", "Anymaker")
-            if os.path.isdir(game):
-                return game, acf
-    sys.exit("未找到 Anymaker 安装（Steam 库列表：" + "; ".join(libs) + "）")
+# NOTE：原本用于寻找游戏路径的函数
+# def find_game():
+#     """注册表 SteamPath + libraryfolders.vdf 定位游戏目录与 appmanifest。"""
+#     try:
+#         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
+#             steam, _ = winreg.QueryValueEx(k, "SteamPath")
+#     except OSError:
+#         sys.exit("注册表未找到 Steam，请手动确认安装路径。")
+#     libs = [steam]
+#     lf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
+#     if os.path.isfile(lf):
+#         for m in re.finditer(r'"path"\s+"([^"]+)"', open(lf, encoding="utf-8", errors="ignore").read()):
+#             libs.append(m.group(1).replace("\\\\", "\\"))
+#     for lib in libs:
+#         acf = os.path.join(lib, "steamapps", f"appmanifest_{APP_ID}.acf")
+#         if os.path.isfile(acf):
+#             game = os.path.join(lib, "steamapps", "common", "Anymaker")
+#             if os.path.isdir(game):
+#                 return game, acf
+#     sys.exit("未找到 Anymaker 安装（Steam 库列表：" + "; ".join(libs) + "）")
 
 
 def buildid(acf):
@@ -405,7 +405,7 @@ def step4_gcl(game, pairs, route):
     open(gcl, "wb").write(bytes(data))
     print(f"  gcl: 替换 {patched} 词条（译超长跳过 {skipped}），大小不变")
 
-
+# NOTE：原备份函数
 def backup(game, bid):
     bdir = os.path.join(here(), f"备份_{bid}")
     if os.path.isdir(bdir):
@@ -488,63 +488,6 @@ def download_dict(info):
             last_err = e
     raise RuntimeError(f"全部下载源失败：{last_err}")
 
-
-def do_update(interactive=True):
-    """检查汉化更新；有则询问并更新词典+重装。网络失败如实打印。返回 True=已更新。"""
-    try:
-        info = fetch_update_info()
-    except Exception as e:
-        print(f"⚠ 更新检查失败：无法连接 GitHub（{type(e).__name__}: {e}）")
-        print("  本次跳过更新检查，安装/卸载功能不受影响。")
-        return False
-    remote = str(info.get("version", "0"))
-    if _version_tuple(remote) <= _version_tuple(VERSION):
-        print(f"汉化已是最新（v{VERSION}，{info.get('date', '')}）")
-        return False
-    print(f"★ 发现汉化更新 v{remote}（当前 v{VERSION}）")
-    print(f"  更新说明：{info.get('notes', '')}")
-    print(f"  安装器新版本：{info.get('release_url', GITHUB_RELEASES)}（exe 本体需手动下载替换）")
-    if interactive:
-        try:
-            if not sys.stdin.isatty():
-                print("  [非交互环境] 未自动更新——可运行 update 子命令或菜单 4 手动更新")
-                return False
-            ans = input("  是否更新词典并重新应用汉化？[Y/n]: ").strip().lower()
-        except EOFError:
-            ans = "n"
-        if ans not in ("", "y", "yes"):
-            print("  已跳过更新。")
-            return False
-    try:
-        data = download_dict(info)
-    except Exception as e:
-        print(f"⚠ 更新失败（词典下载/校验）：{e}")
-        return False
-    p = os.path.join(here(), "润色词典.csv")
-    if os.path.exists(p):
-        shutil.copy2(p, os.path.join(here(), "润色词典.bak.csv"))
-    open(p, "wb").write(data)
-    print("  词典已更新（旧版备份为 润色词典.bak.csv），正在重新应用汉化…")
-    with _Tee(os.path.join(here(), "安装日志.txt")):
-        _do_install(current_route())
-    return True
-
-
-def check_game_update():
-    """检测游戏 buildid 是否自上次安装后变化。返回 (旧, 新) 或 None。"""
-    p = os.path.join(here(), STATE_FILE)
-    if not os.path.exists(p):
-        return None
-    try:
-        st = json.load(open(p, encoding="utf-8"))
-        old = st.get("buildid")
-        game, acf = find_game()
-        new = buildid(acf)
-        return (old, new) if old and old != new else None
-    except Exception:
-        return None
-
-
 def load_state():
     """读安装状态（含路线）；文件缺失或损坏返回 {}。"""
     p = os.path.join(here(), STATE_FILE)
@@ -619,10 +562,9 @@ def cmd_install(route=None):
 def _do_install(route=DEFAULT_ROUTE):
     if game_running():
         sys.exit("游戏正在运行，请先退出。")
-    game, acf = find_game()
-    bid = buildid(acf)
-    print(f"游戏目录: {game}\nbuildid: {bid}\n安装路线: {route_name(route)} ({route})" +
-          ("" if bid in KNOWN_BUILDS else "\n⚠ 未测试过的版本：脚本按内容推导应兼容，装后请验证；异常先 uninstall。"))
+    # NOTE：程序原本需要获取注册表中的steam路径和steam游戏的acf文件，这俩对于学习版来说完全没有。所以直接写死路径，谁要用就掏出编辑器改就行了
+    game=r"C:\Program Files (x86)\Steam\steamapps\common\Anymaker25398411by_etiska"
+    bid="25398411"
     prev = load_state().get("route")
     if prev and prev != route:
         print(f"路线切换：{route_name(prev)} → {route_name(route)}；先还原官方原始文件再重装。")
@@ -644,8 +586,7 @@ def _do_install(route=DEFAULT_ROUTE):
     if route == ROUTE_OFFICIAL:
         print("提示：官方路线不含社区译文，界面残留英文属预期（F7 面板、")
         print("超短词、生物与僵尸名）；需要更完整界面请重装选润色后路线。")
-    print("若界面仍为英文或游戏异常：把 exe 旁的 安装日志.txt")
-    print("发给维护者，或选 3 卸载还原。")
+    print("若界面仍为英文或游戏异常：自己解决")
     print("=" * 46)
 
 
@@ -721,32 +662,14 @@ if __name__ == "__main__":
         else:
             print(__doc__)
     else:
-        # 启动即自动检查汉化更新 + 游戏版本变动检测（网络失败如实提示后继续）
-        do_update(interactive=True)
-        gu = check_game_update()
-        if gu:
-            old, new = gu
-            print(f"★ 游戏已更新（buildid {old} → {new}），官方更新覆盖了汉化的部分文件。")
-            try:
-                ans = input("  是否立即重新应用汉化？[Y/n]: ").strip().lower() if sys.stdin.isatty() \
-                    else "n"
-            except EOFError:
-                ans = "n"
-            if ans in ("", "y", "yes"):
-                with _Tee(os.path.join(here(), "安装日志.txt")):
-                    _do_install(current_route())
-            else:
-                print("  已跳过——稍后可在菜单选 1 重新应用。")
-        print()
-        print("==== Anymaker 简中汉化包 ====")
-        print("  1) 安装 / 更新汉化（可选官方 / 润色后路线）")
-        print("  2) 查看状态")
-        print("  3) 卸载，还原官方文件")
-        print("  4) 检查汉化更新")
+        print("==== Anymaker学习版 简中汉化包 ====")
+        print("警告：使用前请备份游戏文件")
+        print("  1) 安装汉化（可选官方 / 润色后路线）")
+        # print("  2) 查看状态")
+        # print("  3) 卸载，还原官方文件")
         print("  0) 退出")
         try:
-            choice = input("请选择 [1/2/3/4/0]: ").strip()
+            choice = input("请选择 [1/2/3/0]: ").strip()
         except EOFError:
             choice = "2"
-        {"1": cmd_install, "2": cmd_status, "3": cmd_uninstall,
-         "4": lambda: do_update(interactive=True)}.get(choice, lambda: None)()
+        {"1": cmd_install, "2": cmd_status, "3": cmd_uninstall}.get(choice, lambda: None)()
